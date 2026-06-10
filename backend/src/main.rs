@@ -1,7 +1,9 @@
-mod cox_model;
+mod config;
+mod data_loader;
 mod handlers;
 mod models;
-mod network_analysis;
+mod route_analyzer;
+mod survival_model;
 
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;

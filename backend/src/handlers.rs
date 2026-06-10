@@ -5,9 +5,11 @@ use axum::{
 };
 use sqlx::PgPool;
 
-use crate::cox_model;
+use crate::config::AppConfig;
+use crate::data_loader::TimeVaryingBuilder;
 use crate::models::*;
-use crate::network_analysis;
+use crate::route_analyzer::{RouteAnalyzer, DEFAULT_PERIODS};
+use crate::survival_model::CoxModel;
 
 pub fn routes(pool: PgPool) -> Router {
     Router::new()
@@ -84,10 +86,7 @@ async fn get_city_timeline(State(pool): State<PgPool>, Path(id): Path<i32>) -> J
     .await
     .unwrap_or_default();
 
-    Json(CityTimeline {
-        city,
-        climate_records,
-    })
+    Json(CityTimeline { city, climate_records })
 }
 
 async fn get_cities_by_year(
@@ -144,9 +143,7 @@ async fn climate_summary(State(pool): State<PgPool>) -> Json<Vec<RegionClimateSu
 
     for region in &regions {
         let records: Vec<&ClimateData> = data.iter().filter(|d| d.region == *region).collect();
-        if records.is_empty() {
-            continue;
-        }
+        if records.is_empty() { continue; }
         let avg_temp = records
             .iter()
             .filter_map(|r| r.temperature_anomaly)
@@ -249,8 +246,13 @@ async fn run_cox_analysis(State(pool): State<PgPool>) -> Json<AnalysisResponse> 
     .await
     .unwrap_or_default();
 
-    let intervals = cox_model::prepare_time_varying_data(&cities, &climate, &connections);
-    let result = cox_model::run_time_varying_cox(&intervals);
+    let config = AppConfig::from_env();
+
+    let builder = TimeVaryingBuilder::new(&cities, &climate, &connections, &config.cox);
+    let intervals = builder.build();
+
+    let model = CoxModel::new(&intervals, &config.cox);
+    let result = model.fit();
 
     Json(result)
 }
@@ -276,7 +278,10 @@ async fn network_analysis_handler(
     .await
     .unwrap_or_default();
 
-    let metrics = network_analysis::compute_network_metrics(&cities, &connections);
+    let config = AppConfig::from_env();
+    let analyzer = RouteAnalyzer::new(&config.network, &config.barriers);
+    let metrics = analyzer.compute_network_metrics(&cities, &connections);
+
     Json(metrics)
 }
 
@@ -295,6 +300,9 @@ async fn route_shift_handler(State(pool): State<PgPool>) -> Json<Vec<TradeRouteS
     .await
     .unwrap_or_default();
 
-    let shifts = network_analysis::compute_route_shifts(&cities, &connections);
+    let config = AppConfig::from_env();
+    let analyzer = RouteAnalyzer::new(&config.network, &config.barriers);
+    let shifts = analyzer.compute_route_shifts(&cities, &connections, &DEFAULT_PERIODS);
+
     Json(shifts)
 }
