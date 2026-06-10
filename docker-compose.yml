@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  postgis:
+    image: postgis/postgis:15-3.4
+    container_name: silkroad-postgis
+    environment:
+      POSTGRES_DB: silkroad
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d silkroad"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - silkroad-net
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=256MB"
+      - "-c"
+      - "work_mem=8MB"
+      - "-c"
+      - "maintenance_work_mem=64MB"
+      - "-c"
+      - "effective_cache_size=768MB"
+
+  simulator:
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile
+    container_name: silkroad-simulator
+    environment:
+      DB_HOST: postgis
+      DB_PORT: 5432
+      DB_NAME: silkroad
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      SIM_NUM_CITIES: 120
+      SIM_RANDOM_SEED: 42
+    depends_on:
+      postgis:
+        condition: service_healthy
+    networks:
+      - silkroad-net
+    restart: "no"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: silkroad-api
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgis:5432/silkroad
+      FRONTEND_DIR: /app/frontend
+      LISTEN_ADDR: 0.0.0.0:3000
+      RUST_LOG: silkroad_analysis=info,tower_http=info,sqlx=warn
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgis:
+        condition: service_healthy
+      simulator:
+        condition: service_completed_successfully
+    networks:
+      - silkroad-net
+    restart: unless-stopped
+
+volumes:
+  postgis-data:
+
+networks:
+  silkroad-net:
+    driver: bridge
