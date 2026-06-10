@@ -110,14 +110,17 @@ pub struct RegionClimateSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AttributionInput {
+pub struct TimeVaryingInterval {
     pub city_id: i32,
-    pub survival_time: i32,
+    pub start: i32,
+    pub stop: i32,
     pub event: i32,
+    pub temp_anomaly: f64,
+    pub precip_index: f64,
     pub temp_change: f64,
     pub precip_change: f64,
     pub route_change: f64,
-    pub glacier_advance: i32,
+    pub glacier_advance: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

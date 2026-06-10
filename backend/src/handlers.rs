@@ -242,8 +242,15 @@ async fn run_cox_analysis(State(pool): State<PgPool>) -> Json<AnalysisResponse> 
     .await
     .unwrap_or_default();
 
-    let inputs = cox_model::prepare_attribution_data(&cities, &climate);
-    let result = cox_model::run_cox_model(&inputs);
+    let connections = sqlx::query_as::<_, TradeConnection>(
+        "SELECT id, city_from, city_to, period_start, period_end, trade_volume, route_type FROM trade_connections ORDER BY period_start"
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default();
+
+    let intervals = cox_model::prepare_time_varying_data(&cities, &climate, &connections);
+    let result = cox_model::run_time_varying_cox(&intervals);
 
     Json(result)
 }

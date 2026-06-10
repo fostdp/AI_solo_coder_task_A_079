@@ -1,31 +1,44 @@
 const API_BASE = '/api';
 
-let map, canvasOverlay, ctx;
+let map, glCanvas, gl, shaderProgram;
 let citiesData = [];
 let climateData = [];
 let tradeArrowsData = [];
 let currentYear = 600;
-let cityMarkers = {};
+let cityCanvasRenderer;
+let cityLayer;
 let isPlaying = false;
 let playInterval = null;
 let animationFrame = null;
 let routeAnimOffset = 0;
+let lastRenderTime = 0;
+const FRAME_INTERVAL = 33;
+
+let glBuffers = {
+    arrows: null,
+    arrowCount: 0,
+    heads: null,
+    headCount: 0,
+};
 
 document.addEventListener('DOMContentLoaded', () => {
     initMap();
-    initCanvas();
+    initWebGL();
     initTimeline();
     initModals();
     loadData();
 });
 
 function initMap() {
+    cityCanvasRenderer = L.canvas({ padding: 0.5 });
+
     map = L.map('map', {
         center: [38, 65],
         zoom: 4,
         minZoom: 3,
         maxZoom: 8,
         zoomControl: true,
+        renderer: cityCanvasRenderer,
     });
 
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
@@ -49,22 +62,94 @@ function initMap() {
     legend.addTo(map);
 
     map.on('moveend zoomend', () => {
-        drawTradeArrows();
+        updateCityStatuses();
+        updateWebGLArrows();
     });
 }
 
-function initCanvas() {
-    canvasOverlay = document.getElementById('canvas-overlay');
-    ctx = canvasOverlay.getContext('2d');
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
+function initWebGL() {
+    glCanvas = document.getElementById('gl-overlay');
+    gl = glCanvas.getContext('webgl', { alpha: true, premultipliedAlpha: false, antialias: true });
+    if (!gl) {
+        gl = glCanvas.getContext('experimental-webgl', { alpha: true });
+    }
+
+    resizeGLCanvas();
+    window.addEventListener('resize', () => {
+        resizeGLCanvas();
+        if (gl) updateWebGLArrows();
+    });
+
+    if (gl) {
+        initShaders();
+    }
 }
 
-function resizeCanvas() {
+function resizeGLCanvas() {
     const container = document.getElementById('map-container');
-    canvasOverlay.width = container.clientWidth;
-    canvasOverlay.height = container.clientHeight;
-    drawTradeArrows();
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+    glCanvas.width = w * dpr;
+    glCanvas.height = h * dpr;
+    glCanvas.style.width = w + 'px';
+    glCanvas.style.height = h + 'px';
+    if (gl) {
+        gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+    }
+}
+
+function initShaders() {
+    const vsSource = `
+        attribute vec2 aPosition;
+        attribute vec4 aColor;
+        attribute float aDashPhase;
+        uniform vec2 uResolution;
+        uniform float uDashOffset;
+        varying vec4 vColor;
+        varying float vDashPhase;
+        void main() {
+            vec2 clipSpace = (aPosition / uResolution) * 2.0 - 1.0;
+            clipSpace.y *= -1.0;
+            gl_Position = vec4(clipSpace, 0.0, 1.0);
+            vColor = aColor;
+            vDashPhase = aDashPhase + uDashOffset;
+        }
+    `;
+
+    const fsSource = `
+        precision mediump float;
+        varying vec4 vColor;
+        varying float vDashPhase;
+        void main() {
+            float dash = mod(vDashPhase, 14.0);
+            if (dash > 8.0) discard;
+            gl_FragColor = vColor;
+        }
+    `;
+
+    const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+    const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+
+    shaderProgram = gl.createProgram();
+    gl.attachShader(shaderProgram, vs);
+    gl.attachShader(shaderProgram, fs);
+    gl.linkProgram(shaderProgram);
+
+    if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+        console.error('Shader link failed:', gl.getProgramInfoLog(shaderProgram));
+        shaderProgram = null;
+    }
+}
+
+function compileShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile failed:', gl.getShaderInfoLog(shader));
+    }
+    return shader;
 }
 
 function initTimeline() {
@@ -75,7 +160,7 @@ function initTimeline() {
         currentYear = parseInt(e.target.value);
         updateYearDisplay();
         updateCityStatuses();
-        drawTradeArrows();
+        updateWebGLArrows();
     });
 
     document.getElementById('btn-play').addEventListener('click', () => {
@@ -87,7 +172,7 @@ function initTimeline() {
                 slider.value = currentYear;
                 updateYearDisplay();
                 updateCityStatuses();
-                drawTradeArrows();
+                updateWebGLArrows();
             }, 100);
         }
     });
@@ -102,7 +187,7 @@ function initTimeline() {
         slider.value = currentYear;
         updateYearDisplay();
         updateCityStatuses();
-        drawTradeArrows();
+        updateWebGLArrows();
     });
 
     updateYearDisplay();
@@ -205,52 +290,237 @@ function getStatusColor(status) {
 }
 
 function addCityMarkers() {
-    citiesData.forEach(city => {
-        const status = getCityStatus(city, currentYear);
-        const color = getStatusColor(status);
+    if (cityLayer) {
+        map.removeLayer(cityLayer);
+    }
 
-        const marker = L.circleMarker([city.latitude, city.longitude], {
-            radius: 6,
-            fillColor: color,
-            color: '#fff',
-            weight: 1,
-            opacity: 0.8,
-            fillOpacity: 0.85
-        }).addTo(map);
+    const geojson = {
+        type: 'FeatureCollection',
+        features: citiesData.map(city => ({
+            type: 'Feature',
+            properties: { id: city.id, status: getCityStatus(city, currentYear) },
+            geometry: { type: 'Point', coordinates: [city.longitude, city.latitude] }
+        }))
+    };
 
-        marker.bindTooltip(`${city.name_cn || city.name}`, {
-            className: 'city-tooltip',
-            direction: 'top',
-            offset: [0, -8]
-        });
-
-        marker.on('click', () => showCityPanel(city.id));
-
-        cityMarkers[city.id] = marker;
-    });
+    cityLayer = L.geoJSON(geojson, {
+        renderer: cityCanvasRenderer,
+        pointToLayer: (feature, latlng) => {
+            const status = feature.properties.status;
+            const color = getStatusColor(status);
+            return L.circleMarker(latlng, {
+                radius: 6,
+                fillColor: color,
+                color: '#fff',
+                weight: 1,
+                opacity: 0.8,
+                fillOpacity: 0.85
+            });
+        },
+        onEachFeature: (feature, layer) => {
+            const cityId = feature.properties.id;
+            const city = citiesData.find(c => c.id === cityId);
+            if (city) {
+                layer.bindTooltip(`${city.name_cn || city.name}`, {
+                    className: 'city-tooltip',
+                    direction: 'top',
+                    offset: [0, -8]
+                });
+                layer.on('click', () => showCityPanel(cityId));
+            }
+        }
+    }).addTo(map);
 }
 
 function updateCityStatuses() {
-    citiesData.forEach(city => {
-        const marker = cityMarkers[city.id];
-        if (!marker) return;
+    if (!cityLayer) return;
+
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+
+    cityLayer.eachLayer(layer => {
+        const feature = layer.feature;
+        const cityId = feature.properties.id;
+        const city = citiesData.find(c => c.id === cityId);
+        if (!city) return;
 
         if (city.founded_year > currentYear) {
-            marker.setStyle({ fillOpacity: 0, opacity: 0 });
+            layer.setStyle({ fillOpacity: 0, opacity: 0 });
+            return;
+        }
+
+        const latlng = L.latLng(city.latitude, city.longitude);
+        if (!bounds.contains(latlng)) {
+            layer.setStyle({ fillOpacity: 0, opacity: 0 });
             return;
         }
 
         const status = getCityStatus(city, currentYear);
         const color = getStatusColor(status);
         const size = status === 'prosperity' ? 7 : status === 'decline' ? 5 : 6;
+        const scaleFactor = Math.max(0.6, Math.min(1.5, zoom / 4));
 
-        marker.setStyle({
+        layer.setStyle({
             fillColor: color,
             fillOpacity: 0.85,
             opacity: 0.8,
-            radius: size
+            radius: size * scaleFactor
         });
     });
+}
+
+function startArrowAnimation() {
+    function animate(timestamp) {
+        if (timestamp - lastRenderTime < FRAME_INTERVAL) {
+            animationFrame = requestAnimationFrame(animate);
+            return;
+        }
+        lastRenderTime = timestamp;
+        routeAnimOffset += 0.5;
+        if (routeAnimOffset > 20) routeAnimOffset = 0;
+        renderWebGLArrows();
+        animationFrame = requestAnimationFrame(animate);
+    }
+    animationFrame = requestAnimationFrame(animate);
+}
+
+function updateWebGLArrows() {
+    if (!gl || !shaderProgram) return;
+
+    const bounds = map.getBounds();
+    const dpr = window.devicePixelRatio || 1;
+
+    const activeArrows = tradeArrowsData.filter(a => {
+        if (a.period_start > currentYear || a.period_end < currentYear) return false;
+        const fromLatlng = L.latLng(a.from_lat, a.from_lon);
+        const toLatlng = L.latLng(a.to_lat, a.to_lon);
+        return bounds.contains(fromLatlng) || bounds.contains(toLatlng) ||
+               bounds.intersects(L.latLngBounds([fromLatlng, toLatlng]));
+    });
+
+    const arrowVertices = [];
+    const headVertices = [];
+
+    for (const arrow of activeArrows) {
+        const from = map.latLngToContainerPoint([arrow.from_lat, arrow.from_lon]);
+        const to = map.latLngToContainerPoint([arrow.to_lat, arrow.to_lon]);
+
+        const dist = Math.sqrt((to.x - from.x) ** 2 + (to.y - from.y) ** 2);
+        if (dist < 20) continue;
+
+        const fx = from.x * dpr;
+        const fy = from.y * dpr;
+        const tx = to.x * dpr;
+        const ty = to.y * dpr;
+
+        const isSea = arrow.route_type === 'sea';
+        const r = isSea ? 155 : 52;
+        const g = isSea ? 89 : 152;
+        const b = isSea ? 182 : 219;
+        const alpha = isSea ? 0.6 : 0.5;
+        const vol = Math.min(arrow.trade_volume, 1000);
+        const lineHalfWidth = (0.5 + (vol / 1000) * 1.5) * dpr;
+
+        const dx = tx - fx;
+        const dy = ty - fy;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        const nx = -dy / len * lineHalfWidth;
+        const ny = dx / len * lineHalfWidth;
+
+        const totalLen = len / dpr;
+
+        arrowVertices.push(
+            fx + nx, fy + ny, r/255, g/255, b/255, alpha, 0,
+            fx - nx, fy - ny, r/255, g/255, b/255, alpha, 0,
+            tx + nx, ty + ny, r/255, g/255, b/255, alpha, totalLen,
+            fx - nx, fy - ny, r/255, g/255, b/255, alpha, 0,
+            tx + nx, ty + ny, r/255, g/255, b/255, alpha, totalLen,
+            tx - nx, ty + ny, r/255, g/255, b/255, alpha, totalLen
+        );
+
+        if (dist > 50) {
+            const angle = Math.atan2(ty - fy, tx - fx);
+            const midX = (fx + tx) / 2;
+            const midY = (fy + ty) / 2;
+            const headLen = 8 * dpr;
+
+            const p1x = midX;
+            const p1y = midY;
+            const p2x = midX - headLen * Math.cos(angle - 0.4);
+            const p2y = midY - headLen * Math.sin(angle - 0.4);
+            const p3x = midX - headLen * Math.cos(angle + 0.4);
+            const p3y = midY - headLen * Math.sin(angle + 0.4);
+
+            headVertices.push(
+                p1x, p1y, r/255, g/255, b/255, alpha + 0.2, 0,
+                p2x, p2y, r/255, g/255, b/255, alpha + 0.2, 0,
+                p3x, p3y, r/255, g/255, b/255, alpha + 0.2, 0
+            );
+        }
+    }
+
+    if (arrowVertices.length > 0) {
+        if (!glBuffers.arrows) glBuffers.arrows = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, glBuffers.arrows);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arrowVertices), gl.DYNAMIC_DRAW);
+        glBuffers.arrowCount = arrowVertices.length / 7;
+    } else {
+        glBuffers.arrowCount = 0;
+    }
+
+    if (headVertices.length > 0) {
+        if (!glBuffers.heads) glBuffers.heads = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, glBuffers.heads);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(headVertices), gl.DYNAMIC_DRAW);
+        glBuffers.headCount = headVertices.length / 7;
+    } else {
+        glBuffers.headCount = 0;
+    }
+}
+
+function renderWebGLArrows() {
+    if (!gl || !shaderProgram) return;
+
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.useProgram(shaderProgram);
+
+    const uResolution = gl.getUniformLocation(shaderProgram, 'uResolution');
+    gl.uniform2f(uResolution, glCanvas.width, glCanvas.height);
+
+    const uDashOffset = gl.getUniformLocation(shaderProgram, 'uDashOffset');
+    gl.uniform1f(uDashOffset, routeAnimOffset);
+
+    const aPosition = gl.getAttribLocation(shaderProgram, 'aPosition');
+    const aColor = gl.getAttribLocation(shaderProgram, 'aColor');
+    const aDashPhase = gl.getAttribLocation(shaderProgram, 'aDashPhase');
+
+    const STRIDE = 7 * 4;
+
+    if (glBuffers.arrowCount > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, glBuffers.arrows);
+        gl.enableVertexAttribArray(aPosition);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, STRIDE, 0);
+        gl.enableVertexAttribArray(aColor);
+        gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, STRIDE, 8);
+        gl.enableVertexAttribArray(aDashPhase);
+        gl.vertexAttribPointer(aDashPhase, 1, gl.FLOAT, false, STRIDE, 24);
+        gl.drawArrays(gl.TRIANGLES, 0, glBuffers.arrowCount);
+    }
+
+    if (glBuffers.headCount > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, glBuffers.heads);
+        gl.enableVertexAttribArray(aPosition);
+        gl.vertexAttribPointer(aPosition, 2, gl.FLOAT, false, STRIDE, 0);
+        gl.enableVertexAttribArray(aColor);
+        gl.vertexAttribPointer(aColor, 4, gl.FLOAT, false, STRIDE, 8);
+        gl.enableVertexAttribArray(aDashPhase);
+        gl.vertexAttribPointer(aDashPhase, 1, gl.FLOAT, false, STRIDE, 24);
+        gl.drawArrays(gl.TRIANGLES, 0, glBuffers.headCount);
+    }
 }
 
 async function showCityPanel(cityId) {
@@ -412,60 +682,6 @@ function drawLineChart(c, data, x0, y0, w, h, color, label, minV, maxV) {
     c.fillText(label, x0 + 2, y0 + 10);
 }
 
-function startArrowAnimation() {
-    function animate() {
-        routeAnimOffset += 0.5;
-        if (routeAnimOffset > 20) routeAnimOffset = 0;
-        drawTradeArrows();
-        animationFrame = requestAnimationFrame(animate);
-    }
-    animate();
-}
-
-function drawTradeArrows() {
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
-
-    const activeArrows = tradeArrowsData.filter(a =>
-        a.period_start <= currentYear && a.period_end >= currentYear
-    );
-
-    activeArrows.forEach(arrow => {
-        const from = map.latLngToContainerPoint([arrow.from_lat, arrow.from_lon]);
-        const to = map.latLngToContainerPoint([arrow.to_lat, arrow.to_lon]);
-
-        const color = arrow.route_type === 'sea' ? 'rgba(155, 89, 182, 0.6)' : 'rgba(52, 152, 219, 0.5)';
-        const vol = Math.min(arrow.trade_volume, 1000);
-        const width = 1 + (vol / 1000) * 3;
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = width;
-        ctx.setLineDash([8, 6]);
-        ctx.lineDashOffset = -routeAnimOffset;
-        ctx.beginPath();
-        ctx.moveTo(from.x, from.y);
-        ctx.lineTo(to.x, to.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        const angle = Math.atan2(to.y - from.y, to.x - from.x);
-        const dist = Math.sqrt((to.x - from.x) ** 2 + (to.y - from.y) ** 2);
-        if (dist < 30) return;
-
-        const headLen = 8;
-        const midX = (from.x + to.x) / 2;
-        const midY = (from.y + to.y) / 2;
-
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.moveTo(midX, midY);
-        ctx.lineTo(midX - headLen * Math.cos(angle - 0.4), midY - headLen * Math.sin(angle - 0.4));
-        ctx.lineTo(midX - headLen * Math.cos(angle + 0.4), midY - headLen * Math.sin(angle + 0.4));
-        ctx.closePath();
-        ctx.fill();
-    });
-}
-
 async function showCoxAnalysis() {
     const modal = document.getElementById('analysis-modal');
     modal.classList.remove('hidden');
@@ -480,7 +696,14 @@ async function showCoxAnalysis() {
         let html = `<table>
             <tr><th>变量</th><th>系数(β)</th><th>风险比(HR)</th><th>标准误</th><th>p值</th><th>95% CI</th></tr>`;
 
-        const varNames = { temp_change: '温度变化', precip_change: '降水变化', route_change: '路线变迁', glacier_advance: '冰川前进' };
+        const varNames = {
+            temp_anomaly: '温度距平',
+            precip_index: '降水指数',
+            temp_change: '温度变化',
+            precip_change: '降水变化',
+            route_change: '路线变迁',
+            glacier_advance: '冰川前进'
+        };
 
         data.cox_results.forEach(r => {
             const sig = r.p_value < 0.05 ? 'style="color:#e94560;font-weight:bold"' : '';
@@ -499,8 +722,8 @@ async function showCoxAnalysis() {
         drawCoxChart(data.cox_results);
 
         document.getElementById('cox-summary').innerHTML = `
-            <p>样本量: ${data.sample_size} 个城市 | 对数偏似然: ${data.log_likelihood.toFixed(2)} | Concordance: ${data.concordance.toFixed(3)}</p>
-            <p style="margin-top:6px;">风险比(HR) > 1 表示该因子增加城市衰落风险；HR < 1 表示降低风险。p < 0.05 为统计显著。</p>
+            <p>样本量: ${data.sample_size} 个观测区间 (时变Cox模型) | 对数偏似然: ${data.log_likelihood.toFixed(2)} | Concordance: ${data.concordance.toFixed(3)}</p>
+            <p style="margin-top:6px;">时变协变量Cox模型：每个城市的观测被拆分为200年时间区间，每区间独立提取气候协变量。风险比(HR) > 1 表示该因子增加城市衰落风险；HR < 1 表示降低风险。p < 0.05 为统计显著。</p>
         `;
     } catch (e) {
         resultsDiv.innerHTML = '<p style="color:#e74c3c;text-align:center;">分析服务暂不可用</p>';
@@ -519,9 +742,13 @@ function drawCoxChart(results) {
     c.fillStyle = '#1a1a2e';
     c.fillRect(0, 0, w, h);
 
-    const varNames = { temp_change: '温度变化', precip_change: '降水变化', route_change: '路线变迁', glacier_advance: '冰川前进' };
+    const varNames = {
+        temp_anomaly: '温度距平', precip_index: '降水指数',
+        temp_change: '温度变化', precip_change: '降水变化',
+        route_change: '路线变迁', glacier_advance: '冰川前进'
+    };
 
-    const barW = 80;
+    const barW = results.length <= 4 ? 80 : 60;
     const gap = (w - 2 * pad - results.length * barW) / (results.length + 1);
     const maxHR = Math.max(...results.map(r => r.hazard_ratio), 2);
 
@@ -549,7 +776,7 @@ function drawCoxChart(results) {
         c.fillRect(x, y, barW, hrH);
 
         c.fillStyle = '#f5f5f5';
-        c.font = '11px sans-serif';
+        c.font = results.length <= 4 ? '11px sans-serif' : '9px sans-serif';
         c.textAlign = 'center';
         c.fillText(varNames[r.variable] || r.variable, x + barW / 2, h - pad + 16);
 
@@ -616,22 +843,31 @@ function drawRouteShiftChart(shifts) {
         c.fillText(s.period, x, h - pad + 14);
     });
 
-    shifts.forEach((s, i) => {
-        const x = pad + (i / (shifts.length - 1 || 1)) * plotW;
-        const y1 = pad + (1 - (s.centroid_longitude - minLon) / (maxLon - minLon)) * plotH;
-        const y2 = pad + (1 - (s.centroid_latitude - minLat) / (maxLat - minLat)) * plotH;
-        const size = 3 + (s.active_cities / 120) * 8;
-
-        c.fillStyle = '#3498db';
+    const drawConnectedPoints = (values, minV, maxV, color) => {
+        c.strokeStyle = color;
+        c.lineWidth = 1.5;
         c.beginPath();
-        c.arc(x, y1, size, 0, Math.PI * 2);
-        c.fill();
+        shifts.forEach((s, i) => {
+            const x = pad + (i / (shifts.length - 1 || 1)) * plotW;
+            const y = pad + (1 - (values[i] - minV) / (maxV - minV)) * plotH;
+            if (i === 0) c.moveTo(x, y);
+            else c.lineTo(x, y);
+        });
+        c.stroke();
 
-        c.fillStyle = '#e94560';
-        c.beginPath();
-        c.arc(x, y2, size, 0, Math.PI * 2);
-        c.fill();
-    });
+        shifts.forEach((s, i) => {
+            const x = pad + (i / (shifts.length - 1 || 1)) * plotW;
+            const y = pad + (1 - (values[i] - minV) / (maxV - minV)) * plotH;
+            const size = 3 + (s.active_cities / 120) * 8;
+            c.fillStyle = color;
+            c.beginPath();
+            c.arc(x, y, size, 0, Math.PI * 2);
+            c.fill();
+        });
+    };
+
+    drawConnectedPoints(lons, minLon, maxLon, '#3498db');
+    drawConnectedPoints(lats, minLat, maxLat, '#e94560');
 
     c.fillStyle = '#3498db';
     c.font = '11px sans-serif';

@@ -68,7 +68,7 @@ body {
     z-index: 1;
 }
 
-#canvas-overlay {
+#gl-overlay {
     position: absolute;
     top: 0;
     left: 0;
