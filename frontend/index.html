@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>丝绸之路沿线古代城市兴衰与气候变迁关联分析系统</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <div id="app">
+        <header id="header">
+            <h1>丝绸之路沿线古代城市兴衰与气候变迁关联分析</h1>
+            <div class="header-controls">
+                <button id="btn-analysis" class="header-btn">归因分析</button>
+                <button id="btn-route-shift" class="header-btn">路线变迁</button>
+                <button id="btn-climate" class="header-btn">气候总览</button>
+            </div>
+        </header>
+
+        <div id="map-container">
+            <div id="map"></div>
+            <canvas id="canvas-overlay"></canvas>
+        </div>
+
+        <div id="timeline-panel">
+            <div class="timeline-labels">
+                <span class="era-label" data-year="-200">前200年</span>
+                <span class="era-label" data-year="0">公元元年</span>
+                <span class="era-label" data-year="200">200年</span>
+                <span class="era-label" data-year="400">400年</span>
+                <span class="era-label" data-year="600">600年</span>
+                <span class="era-label" data-year="800">800年</span>
+                <span class="era-label" data-year="1000">1000年</span>
+                <span class="era-label" data-year="1200">1200年</span>
+                <span class="era-label" data-year="1400">1400年</span>
+                <span class="era-label" data-year="1500">1500年</span>
+            </div>
+            <div class="timeline-track">
+                <input type="range" id="timeline-slider" min="-200" max="1500" value="600" step="1" />
+                <div id="timeline-indicator"></div>
+            </div>
+            <div id="current-year">公元 600 年</div>
+            <div class="play-controls">
+                <button id="btn-play" title="播放">&#9654;</button>
+                <button id="btn-pause" title="暂停">&#9646;&#9646;</button>
+                <button id="btn-reset" title="重置">&#8634;</button>
+            </div>
+        </div>
+
+        <div id="city-panel" class="hidden">
+            <div class="panel-header">
+                <h2 id="panel-city-name"></h2>
+                <button id="panel-close">&times;</button>
+            </div>
+            <div class="panel-body">
+                <div id="panel-info">
+                    <div class="info-row"><span class="label">建立年代：</span><span id="panel-founded"></span></div>
+                    <div class="info-row"><span class="label">繁荣期：</span><span id="panel-prosperity"></span></div>
+                    <div class="info-row"><span class="label">衰落年代：</span><span id="panel-decline"></span></div>
+                    <div class="info-row"><span class="label">衰落原因：</span><span id="panel-reason"></span></div>
+                    <div class="info-row"><span class="label">区域：</span><span id="panel-region"></span></div>
+                    <div class="info-row"><span class="label">描述：</span><span id="panel-desc"></span></div>
+                </div>
+                <div id="panel-timeline-chart"></div>
+                <div id="panel-climate-chart"></div>
+            </div>
+        </div>
+
+        <div id="analysis-modal" class="modal hidden">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Cox比例风险模型 — 城市衰落归因分析</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="cox-results"></div>
+                    <div id="cox-chart"></div>
+                    <div id="cox-summary"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="route-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>贸易路线变迁检测</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="route-shift-chart"></div>
+                    <div id="route-network-info"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="climate-modal" class="modal hidden">
+            <div class="modal-content modal-large">
+                <div class="modal-header">
+                    <h2>古气候数据总览</h2>
+                    <button class="modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="climate-chart"></div>
+                    <div id="climate-summary-table"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,385 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    overflow: hidden;
+    height: 100vh;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+#header {
+    background: linear-gradient(135deg, #16213e 0%, #0f3460 100%);
+    padding: 8px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 1000;
+    border-bottom: 2px solid #e94560;
+}
+
+#header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    color: #f5f5f5;
+    letter-spacing: 1px;
+}
+
+.header-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.header-btn {
+    background: rgba(233, 69, 96, 0.2);
+    border: 1px solid #e94560;
+    color: #e94560;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.header-btn:hover {
+    background: #e94560;
+    color: #fff;
+}
+
+#map-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+#map {
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+
+#canvas-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 450;
+}
+
+#timeline-panel {
+    background: linear-gradient(0deg, #16213e 0%, #1a1a2e 100%);
+    padding: 8px 20px 12px;
+    border-top: 2px solid #e94560;
+    z-index: 1000;
+}
+
+.timeline-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 4px;
+}
+
+.timeline-track {
+    position: relative;
+    margin: 0 10px;
+}
+
+#timeline-slider {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 8px;
+    background: linear-gradient(90deg, #2d4059, #e94560, #ea5455, #f07b3f, #2d4059);
+    border-radius: 4px;
+    outline: none;
+    cursor: pointer;
+}
+
+#timeline-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #e94560;
+    border: 2px solid #fff;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(233, 69, 96, 0.6);
+}
+
+#current-year {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    color: #e94560;
+    margin-top: 2px;
+    letter-spacing: 2px;
+}
+
+.play-controls {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.play-controls button {
+    background: rgba(233, 69, 96, 0.15);
+    border: 1px solid #e94560;
+    color: #e94560;
+    width: 32px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.play-controls button:hover {
+    background: #e94560;
+    color: #fff;
+}
+
+#city-panel {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 380px;
+    height: 100%;
+    background: rgba(22, 33, 62, 0.96);
+    border-left: 2px solid #e94560;
+    z-index: 800;
+    overflow-y: auto;
+    transition: transform 0.3s ease;
+}
+
+#city-panel.hidden {
+    transform: translateX(100%);
+}
+
+.panel-header {
+    background: linear-gradient(135deg, #0f3460, #16213e);
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #e94560;
+}
+
+.panel-header h2 {
+    font-size: 18px;
+    color: #f5f5f5;
+}
+
+#panel-close {
+    background: none;
+    border: none;
+    color: #e94560;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0 4px;
+}
+
+.panel-body {
+    padding: 12px 16px;
+}
+
+.info-row {
+    margin-bottom: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.info-row .label {
+    color: #888;
+    font-weight: 600;
+}
+
+#panel-timeline-chart, #panel-climate-chart {
+    margin-top: 16px;
+    background: rgba(15, 52, 96, 0.4);
+    border-radius: 6px;
+    padding: 10px;
+}
+
+.chart-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #e94560;
+    margin-bottom: 8px;
+}
+
+#panel-timeline-chart canvas, #panel-climate-chart canvas {
+    width: 100%;
+    height: 120px;
+}
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: #16213e;
+    border: 2px solid #e94560;
+    border-radius: 8px;
+    width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.modal-large {
+    width: 900px;
+}
+
+.modal-header {
+    background: linear-gradient(135deg, #0f3460, #16213e);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #e94560;
+}
+
+.modal-header h2 {
+    font-size: 16px;
+    color: #f5f5f5;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    color: #e94560;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+.modal-body {
+    padding: 16px 20px;
+}
+
+#cox-results table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+
+#cox-results th, #cox-results td {
+    padding: 8px 6px;
+    text-align: left;
+    border-bottom: 1px solid rgba(233, 69, 96, 0.2);
+}
+
+#cox-results th {
+    color: #e94560;
+    font-weight: 600;
+    background: rgba(15, 52, 96, 0.5);
+}
+
+#cox-summary {
+    margin-top: 12px;
+    font-size: 13px;
+    color: #aaa;
+    line-height: 1.6;
+}
+
+.legend {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(22, 33, 62, 0.92);
+    padding: 10px 14px;
+    border-radius: 6px;
+    border: 1px solid #e94560;
+    z-index: 500;
+    font-size: 12px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.legend-dot.prosperity { background: #27ae60; }
+.legend-dot.transition { background: #f39c12; }
+.legend-dot.decline { background: #e74c3c; }
+
+.route-arrow-legend {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.legend-line {
+    width: 30px;
+    height: 3px;
+}
+
+.legend-line.land { background: #3498db; }
+.legend-line.sea { background: #9b59b6; }
+
+#route-shift-chart canvas, #climate-chart canvas {
+    width: 100%;
+    height: 250px;
+}
+
+#climate-summary-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 16px;
+}
+
+#climate-summary-table th, #climate-summary-table td {
+    padding: 8px 10px;
+    text-align: center;
+    border-bottom: 1px solid rgba(233, 69, 96, 0.2);
+}
+
+#climate-summary-table th {
+    color: #e94560;
+    font-weight: 600;
+    background: rgba(15, 52, 96, 0.5);
+}
+
+.leaflet-container {
+    background: #0a1628;
+}

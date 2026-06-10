@@ -1,0 +1,8 @@
+﻿cargo :  Downloading crates ...
+所在位置 行:1 字符: 153
++ ... der_task_A\AI_solo_coder_task_A_079\backend; cargo build *>&1 | Out-F ...
++                                                  ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ( Downloading crates ...:String) [],  
+   RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
